@@ -2,6 +2,7 @@ import * as api from "../api.js";
 import { h, icon, inr, inrAuto, dmy, pct, plural, monthLabel, store, loadingLine } from "../ui.js";
 import { hbars, columns, stacked, lines, chartCard, SERIES, OTHER } from "../charts.js";
 import { noData, openMerchant } from "./common.js";
+import { state } from "../state.js";
 
 const AXIS_GRAY = "var(--axis)";
 
@@ -24,6 +25,21 @@ function deltaNode(now, before, label, upIsBad = true) {
     `${ch >= 0 ? "+" : "−"}${Math.abs(ch * 100).toFixed(0)}%`, h("span", { class: "muted", style: { fontWeight: 400 }, text: ` vs ${label} (${inr(before)})` }));
 }
 
+// the profile's monthly budget (Profile page), shown only when a single month is selected
+function budgetNode(spend, p, projection) {
+  const budget = state.profile?.monthly_budget;
+  const oneMonth = p.start.endsWith("-01") && p.start.slice(0, 7) === p.end.slice(0, 7);
+  if (!budget || !oneMonth) return null;
+  const used = spend / budget, over = spend > budget;
+  const pace = projection && !over && projection.projected > budget ? ` At this pace you will go over by about ${inr(projection.projected - budget)}.` : "";
+  return h("div", { style: { marginTop: "12px" } },
+    h("div", { class: "row", style: { justifyContent: "space-between" } }, h("span", { class: "muted", text: `Budget ${inr(budget)}` }),
+      h("span", { class: `delta ${over ? "bad" : used > 0.85 ? "flat" : "good"}`, text: over ? `${inr(spend - budget)} over` : `${inr(budget - spend)} left` })),
+    h("div", { class: "meter", style: { marginTop: "6px" }, role: "meter", "aria-valuemin": "0", "aria-valuemax": String(budget), "aria-valuenow": String(Math.round(spend)), "aria-label": "Budget used" },
+      h("div", { style: { width: `${Math.min(100, Math.round(used * 100))}%`, background: over ? "var(--bad)" : null } })),
+    pace ? h("p", { class: "ink2", style: { margin: "6px 0 0" }, text: pace.trim() }) : null);
+}
+
 function view(d, root) {
   const ov = d.overview, p = d.period;
   const sel = h("select", { class: "select", "aria-label": "Period", onchange: (e) => { store("hisaab-period", e.target.value); render(root); } },
@@ -35,7 +51,8 @@ function view(d, root) {
   const proj = d.projection ? h("p", { class: "ink2", style: { margin: "6px 0 0" }, text: `At this pace ${d.projection.month} will end around ${inr(d.projection.projected)} (an estimate; last month was ${inr(d.projection.last_month)}).` }) : null;
   const hero = h("section", { class: "card hero" }, h("div", { class: "label", text: `Spent · ${p.label}` }), h("div", { class: "value", text: inr(ov.spend) }),
     ov.prev ? deltaNode(ov.spend, ov.prev.spend, ov.prev.period.label) : null,
-    h("p", { class: "ink2", style: { margin: "8px 0 0" }, text: `${plural(ov.n_payments, "payment")} · about ${inr(ov.avg_per_day)} a day · biggest ${inr(ov.biggest?.amount || 0)}${ov.biggest ? " at " + ov.biggest.merchant : ""}` }), proj);
+    h("p", { class: "ink2", style: { margin: "8px 0 0" }, text: `${plural(ov.n_payments, "payment")} · about ${inr(ov.avg_per_day)} a day · biggest ${inr(ov.biggest?.amount || 0)}${ov.biggest ? " at " + ov.biggest.merchant : ""}` }), proj,
+    budgetNode(ov.spend, p, d.projection));
   const net = ov.net;
   const tile = (label, value, sub, extra) => h("section", { class: "card tile" }, h("div", { class: "label", text: label }), h("div", { class: "value", text: value }), sub ? h("div", { class: "muted", text: sub }) : null, extra || null);
   const peoplePct = ov.spend ? ov.p2p_spend / ov.spend : 0;

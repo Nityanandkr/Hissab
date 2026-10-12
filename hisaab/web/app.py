@@ -11,6 +11,8 @@ SECURITY MODEL (the app handles bank statements, so even though it is "just loca
   * all SQL is parameterised; all text from statements is inserted into the page with textContent (never innerHTML) - see static/js/ui.js
   * errors: JSON message only, stack traces go to the server log, not to the browser
   * "Delete all my data" really deletes the database file and the models
+  * profiles: each one is a separate data folder (hisaab/profiles.py); the browser's choice is a cookie holding only the
+    profile id (HttpOnly, SameSite=Strict) and an unknown id falls back to the first profile
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from flask import Flask, Response, abort, jsonify, render_template, request
+from flask import Flask, Response, abort, g, jsonify, render_template, request
 from flask.json.provider import DefaultJSONProvider
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 from werkzeug.utils import secure_filename
@@ -30,8 +32,11 @@ from .. import config, taxonomy
 from ..engine import Engine
 from ..ingest.readers import ReadError
 from ..nlq import llm
+from ..profiles import Profiles
 
 log = logging.getLogger("hisaab")
+PROFILE_COOKIE = "hisaab_profile"
+MAX_FILES = 20                       # statements per multi-file import
 ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"} | config.EXTRA_HOSTS   # extra names only for a hosted demo (config.py)
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
@@ -67,13 +72,25 @@ class _Provider(DefaultJSONProvider):
         return DefaultJSONProvider.default(o)
 
 
-def create_app(engine: Engine | None = None) -> Flask:
+class _CurrentEngine:
+    """Stands in for 'the engine of the profile this request is using', so every route can keep saying eng.something()."""
+    def __init__(self, profiles: Profiles) -> None:
+        self._profiles = profiles
+
+    def __getattr__(self, name):
+        return getattr(self._profiles.engine(g.profile["id"]), name)
+
+
+def create_app(engine: Engine | None = None, profiles: Profiles | None = None) -> Flask:
     app = Flask(__name__, static_folder="static", template_folder="templates")
     app.json = _Provider(app)
     app.json.sort_keys = False                      # keep dict order: series are ranked by spend and the UI relies on that order
     app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_MB * 1024 * 1024
-    eng = engine or Engine()
+    # a fixed engine (tests) means one implicit profile; otherwise every request uses the profile chosen by its cookie
+    profs = None if engine is not None else (profiles or Profiles())
+    eng = engine if engine is not None else _CurrentEngine(profs)
     app.config["ENGINE"] = eng
+    app.config["PROFILES"] = profs
 
     # ---- guards -------------------------------------------------------------------------------------------------------
     @app.before_request
@@ -87,6 +104,7 @@ def create_app(engine: Engine | None = None) -> Flask:
             origin = request.headers.get("Origin")
             if origin and origin.split("://", 1)[-1] != request.host:
                 return jsonify(error="Cross-origin request blocked."), 403
+        g.profile = profs.resolve(request.cookies.get(PROFILE_COOKIE)) if profs else {"id": "default", "name": "Me"}
 
     @app.after_request
     def _headers(resp: Response):
@@ -103,7 +121,7 @@ def create_app(engine: Engine | None = None) -> Flask:
     @app.errorhandler(Exception)
     def _err(e):
         if isinstance(e, RequestEntityTooLarge):
-            return jsonify(error=f"File is larger than {config.MAX_UPLOAD_MB} MB."), 413
+            return jsonify(error=f"The upload is larger than {config.MAX_UPLOAD_MB} MB (all files together). Import fewer files at a time."), 413
         if isinstance(e, HTTPException):
             return jsonify(error=e.description), e.code
         if isinstance(e, (ValueError, ReadError)):
@@ -128,6 +146,44 @@ def create_app(engine: Engine | None = None) -> Flask:
         raw = request.form.get("mapping")
         return json.loads(raw) if raw else None
 
+    def _need_profiles() -> Profiles:
+        if profs is None:
+            abort(404)
+        return profs
+
+    def _select(resp: Response, pid: str) -> Response:
+        resp.set_cookie(PROFILE_COOKIE, pid, max_age=365 * 24 * 3600, httponly=True, samesite="Strict", secure=request.is_secure)
+        return resp
+
+    # ---- API: profiles --------------------------------------------------------------------------------------------------------
+    @app.get("/api/profiles")
+    def profiles_list():
+        return jsonify(active=g.profile["id"], profiles=_need_profiles().all() if profs else [g.profile])
+
+    @app.post("/api/profiles")
+    def profile_create():
+        p = _need_profiles().create(_json())
+        return _select(jsonify(p), p["id"])
+
+    @app.post("/api/profiles/<pid>")
+    def profile_update(pid: str):
+        return jsonify(_need_profiles().update(pid, _json()))
+
+    @app.post("/api/profiles/<pid>/select")
+    def profile_select(pid: str):
+        p = _need_profiles().get(pid)
+        if p is None:
+            raise ValueError("That profile does not exist any more.")
+        return _select(jsonify(p), pid)
+
+    @app.post("/api/profiles/<pid>/delete")
+    def profile_delete(pid: str):
+        if _json().get("confirm") != "DELETE":
+            raise ValueError('Send {"confirm": "DELETE"} to delete a profile and all its data.')
+        _need_profiles().delete(pid)
+        resp = jsonify(ok=True)
+        return _select(resp, profs.all()[0]["id"]) if pid == g.profile["id"] else resp
+
     @app.get("/api/status")
     def status():
         return jsonify(eng.status())
@@ -145,6 +201,15 @@ def create_app(engine: Engine | None = None) -> Flask:
     def import_commit():
         data, name = _file()
         return jsonify(eng.commit(data, name, _mapping()))
+
+    @app.post("/api/import/commit-many")
+    def import_commit_many():
+        files = [f for f in request.files.getlist("file") if f and f.filename]
+        if not files:
+            raise ValueError("Choose one or more statement files (.csv, .xlsx or .xls).")
+        if len(files) > MAX_FILES:
+            raise ValueError(f"Import at most {MAX_FILES} files at a time.")
+        return jsonify(eng.commit_many([(f.read(), secure_filename(f.filename) or "statement", None) for f in files]))
 
     @app.post("/api/reset")
     def reset():

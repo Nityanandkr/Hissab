@@ -9,7 +9,7 @@
 import * as api from "./api.js";
 import { toast } from "./ui.js";
 
-export const state = { status: null, tax: null, reviewCount: 0, learning: false, lastLearn: null };
+export const state = { status: null, tax: null, reviewCount: 0, learning: false, lastLearn: null, profiles: [], profile: null };
 const listeners = new Set();
 export const onState = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 const notify = () => listeners.forEach((fn) => fn(state));
@@ -18,6 +18,22 @@ export async function loadTaxonomy() {
   if (!state.tax) state.tax = await api.get("/api/taxonomy");
   return state.tax;
 }
+// ---- profiles: each one has its own data on the server; the server remembers this browser's choice in a cookie ----------------------------------
+export async function loadProfiles() {
+  const r = await api.get("/api/profiles");
+  state.profiles = r.profiles;
+  state.profile = r.profiles.find((p) => p.id === r.active) || r.profiles[0];
+  notify();
+  return state.profile;
+}
+export async function switchProfile(id) {
+  if (id === state.profile?.id) return;
+  await api.post(`/api/profiles/${encodeURIComponent(id)}/select`);
+  await loadProfiles();
+  toast(`Switched to ${state.profile.name}.`);
+  window.dispatchEvent(new CustomEvent("hisaab:data"));
+}
+
 export async function refreshStatus() {
   state.status = await api.get("/api/status");
   try { state.reviewCount = state.status.transactions ? (await api.get("/api/review?limit=1")).n_merchants : 0; } catch (e) { state.reviewCount = 0; }

@@ -24,6 +24,11 @@ export function upload(url, file, fields = {}) {
   for (const [k, v] of Object.entries(fields)) fd.append(k, typeof v === "string" ? v : JSON.stringify(v));
   return request("POST", url, fd, true);
 }
+export function uploadMany(url, files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("file", f);
+  return request("POST", url, fd, true);
+}
 export const qs = (obj) => {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(obj)) if (v !== "" && v != null && v !== false) p.set(k, v === true ? "1" : v);

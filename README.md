@@ -24,9 +24,10 @@ Moved the folder? Run `python launch.py --make-desktop` once to rebuild the icon
 | Merchants | resolved shops / people / brands; rename, merge, shop-or-person |
 | Patterns | recurring payments (stopped / price changes), daily habits, unusual payments with reasons |
 | Ask | plain-language questions ("How much did I spend on groceries last month?") |
-| Import | upload a statement, check the detected columns, load demo data, delete everything |
+| Import | upload one or several statements at once, check the detected columns, load demo data, delete a profile's data |
 | Learning | what the app has learned, undo a lesson, label a month in Excel and measure it on your own data |
 | Under the hood | paste any bank narration and watch each step of the analysis |
+| Profile | several profiles (one per person, or one for the demo), each with its own data; name, monthly budget, income, goal |
 
 ## Install somewhere else
 
@@ -42,6 +43,7 @@ with questions the built-in rules cannot parse. It is off by default and only ev
 
 * Everything is stored in `data/` (a SQLite file and the model files). The folder starts empty.
 * **Import -> Delete all my data** removes it; deleting the folder's contents does the same.
+* Each extra profile is its own folder in `data/profiles/`; the first profile uses `data/` itself. Deleting a profile deletes its folder.
 * The server only listens on 127.0.0.1, rejects requests addressed to any other host name, and does not write request logs.
 
 ## Using it beyond one computer

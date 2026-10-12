@@ -92,6 +92,8 @@ const ICONS = {
   coffee: "M5 8h12v6a5 5 0 01-5 5H10a5 5 0 01-5-5zM17 9h2a2 2 0 010 4h-2M8 2v2M12 2v2",
   users: "M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2M10 11a4 4 0 100-8 4 4 0 000 8M23 21v-2a4 4 0 00-3-3.9M16 3.1a4 4 0 010 7.8",
   x: "M6 6l12 12M18 6L6 18",
+  user: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8",
+  chevron: "M6 9l6 6 6-6",
 };
 export function icon(name, attrs = {}) {
   return svg("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round",

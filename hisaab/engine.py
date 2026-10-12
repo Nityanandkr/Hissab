@@ -29,6 +29,7 @@ from .core import features, p2p, pipeline, seed_data
 from .core.model import CategoryModel, effective_params
 from .core.upi_parse import parse as parse_narration
 from .ingest import importer
+from .ingest.readers import ReadError
 from .textutil import mask_vpa, na, norm_ws
 from .views import ViewsMixin
 
@@ -232,51 +233,70 @@ class Engine(ViewsMixin):
         return found
 
     def commit(self, data: bytes, filename: str, mapping: dict | None = None) -> dict:
+        res = self.commit_many([(data, filename, mapping)])
+        if res["files"][0].get("error"):
+            raise ValueError(res["files"][0]["error"])
+        return {**res["files"][0], "status": res["status"], "changes": res["changes"]}
+
+    def commit_many(self, files: list[tuple[bytes, str, dict | None]]) -> dict:
+        """Import several statements in ONE database transaction and classify once at the end (classifying is the slow part).
+        A file that cannot be read is reported and skipped; the others are still imported. Rows repeated across the files
+        (overlapping statements, or a bank statement plus the app export) are stored once."""
         with self._lock:
-            pv = importer.read_statement(data, filename, mapping)
-            keyed = self._keyed(pv.rows)
+            results = []
             c = self.conn()
             try:
-                existing = self._existing_keys(c, [k for k, _ in keyed])
-                new_pairs = [(k, r) for k, r in keyed if k not in existing]
-                # an app export of an already-imported bank row adds the missing time-of-day
-                upgraded = 0
-                for k, r in keyed:
-                    if k in existing and r.has_time:
-                        cur = c.execute("UPDATE transactions SET ts=?, has_time=1 WHERE row_key=? AND has_time=0",
-                                        (r.ts.isoformat(sep=" "), k))
-                        upgraded += cur.rowcount
-                cur = c.execute("INSERT INTO imports(filename, imported_at, n_rows, n_new, n_dupes, date_min, date_max, mapping_json, report_json) "
-                                "VALUES(?,?,?,?,?,?,?,?,?)",
-                                (Path(filename).name[:120], _NOW(), len(pv.rows), len(new_pairs), len(pv.rows) - len(new_pairs),
-                                 pv.report.date_min, pv.report.date_max, json.dumps(pv.mapping.to_dict()), json.dumps(pv.report.to_dict())))
-                import_id = cur.lastrowid
-                if new_pairs:
-                    reg = store.load_registry(c)
-                    st = pipeline.stage1([r for _, r in new_pairs], reg)
-                    key_by_src = {r.src_row: k for k, r in new_pairs}
-                    raw_by_src = {r.src_row: r.raw for _, r in new_pairs}
-                    rows = []
-                    for rec in st.df.itertuples(index=False):
-                        rows.append((key_by_src[rec.src_row], import_id, int(rec.src_row), rec.ts.isoformat(sep=" "), int(rec.has_time),
-                                     rec.ts.date().isoformat(), rec.desc, float(rec.amount), rec.direction, na(rec.balance), na(rec.ref),
-                                     na(rec.rrn), rec.mode, na(rec.marker), na(rec.vpa), na(rec.handle), na(rec.app), na(rec.phone),
-                                     rec.payee_raw, rec.payee_source, float(rec.name_score), rec.remarks, json.dumps(rec.flags),
-                                     float(rec.parse_conf), na(rec.special), rec.match_method, float(rec.match_conf), int(rec.merchant_id),
-                                     json.dumps(raw_by_src.get(rec.src_row, {}))))
-                    store.save_registry(c, reg)
-                    c.executemany(
-                        "INSERT INTO transactions(row_key, import_id, src_row, ts, has_time, date, description, amount, direction, balance, ref, rrn, "
-                        "mode, marker, vpa, handle, app, phone, payee_raw, payee_source, name_score, remarks, flags, parse_conf, special, "
-                        "match_method, match_conf, merchant_id, raw_json) VALUES (" + ",".join("?" * 29) + ")", rows)
+                for data, filename, mapping in files:
+                    try:
+                        pv = importer.read_statement(data, filename, mapping)
+                    except (ValueError, ReadError) as e:
+                        results.append({"filename": Path(filename).name, "error": str(e), "new": 0, "duplicates": 0})
+                        continue
+                    results.append({"filename": Path(filename).name, **self._insert(c, pv, filename)})
                 changes = self._recompute(c)          # classify in the SAME transaction: no reader ever sees unclassified rows
                 c.commit()
             finally:
                 c.close()
             self._bump()
-            return {"import_id": import_id, "rows_in_file": len(pv.rows), "new": len(new_pairs), "duplicates": len(pv.rows) - len(new_pairs),
-                    "time_added_to_existing": upgraded, "report": pv.report.to_dict(), "mapping": pv.mapping.to_dict(),
+            return {"files": results, "new": sum(r["new"] for r in results), "duplicates": sum(r["duplicates"] for r in results),
                     "status": self.status(), "changes": changes}
+
+    def _insert(self, c, pv, filename: str) -> dict:
+        keyed = self._keyed(pv.rows)
+        existing = self._existing_keys(c, [k for k, _ in keyed])
+        new_pairs = [(k, r) for k, r in keyed if k not in existing]
+        # an app export of an already-imported bank row adds the missing time-of-day
+        upgraded = 0
+        for k, r in keyed:
+            if k in existing and r.has_time:
+                cur = c.execute("UPDATE transactions SET ts=?, has_time=1 WHERE row_key=? AND has_time=0",
+                                (r.ts.isoformat(sep=" "), k))
+                upgraded += cur.rowcount
+        cur = c.execute("INSERT INTO imports(filename, imported_at, n_rows, n_new, n_dupes, date_min, date_max, mapping_json, report_json) "
+                        "VALUES(?,?,?,?,?,?,?,?,?)",
+                        (Path(filename).name[:120], _NOW(), len(pv.rows), len(new_pairs), len(pv.rows) - len(new_pairs),
+                         pv.report.date_min, pv.report.date_max, json.dumps(pv.mapping.to_dict()), json.dumps(pv.report.to_dict())))
+        import_id = cur.lastrowid
+        if new_pairs:
+            reg = store.load_registry(c)
+            st = pipeline.stage1([r for _, r in new_pairs], reg)
+            key_by_src = {r.src_row: k for k, r in new_pairs}
+            raw_by_src = {r.src_row: r.raw for _, r in new_pairs}
+            rows = []
+            for rec in st.df.itertuples(index=False):
+                rows.append((key_by_src[rec.src_row], import_id, int(rec.src_row), rec.ts.isoformat(sep=" "), int(rec.has_time),
+                             rec.ts.date().isoformat(), rec.desc, float(rec.amount), rec.direction, na(rec.balance), na(rec.ref),
+                             na(rec.rrn), rec.mode, na(rec.marker), na(rec.vpa), na(rec.handle), na(rec.app), na(rec.phone),
+                             rec.payee_raw, rec.payee_source, float(rec.name_score), rec.remarks, json.dumps(rec.flags),
+                             float(rec.parse_conf), na(rec.special), rec.match_method, float(rec.match_conf), int(rec.merchant_id),
+                             json.dumps(raw_by_src.get(rec.src_row, {}))))
+            store.save_registry(c, reg)
+            c.executemany(
+                "INSERT INTO transactions(row_key, import_id, src_row, ts, has_time, date, description, amount, direction, balance, ref, rrn, "
+                "mode, marker, vpa, handle, app, phone, payee_raw, payee_source, name_score, remarks, flags, parse_conf, special, "
+                "match_method, match_conf, merchant_id, raw_json) VALUES (" + ",".join("?" * 29) + ")", rows)
+        return {"import_id": import_id, "rows_in_file": len(pv.rows), "new": len(new_pairs), "duplicates": len(pv.rows) - len(new_pairs),
+                "time_added_to_existing": upgraded, "report": pv.report.to_dict(), "mapping": pv.mapping.to_dict()}
 
     def load_demo(self) -> dict:
         from .synth import demo_world, layouts

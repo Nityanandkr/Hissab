@@ -1,15 +1,17 @@
 // App shell: sidebar, router, theme, and the "learning…" banner.
-import { h, svg, $, icon, store, closeDrawer, toast, loadingLine } from "./ui.js";
-import { state, onState, refreshStatus, loadTaxonomy } from "./state.js";
+import { h, svg, $, icon, store, closeDrawer, toast, loadingLine, popMenu } from "./ui.js";
+import { state, onState, refreshStatus, loadTaxonomy, loadProfiles, switchProfile } from "./state.js";
 
 const NAV = [
   ["dashboard", "Dashboard", "dashboard"], ["transactions", "Transactions", "list"], ["review", "Review", "review"], ["merchants", "Merchants", "store"],
   ["patterns", "Patterns", "repeat"], ["ask", "Ask", "chat"], ["import", "Import", "upload"], ["model", "Learning", "brain"], ["how", "Under the hood", "flask"],
+  ["profile", "Profile", "user"],
 ];
 const loaders = {
   dashboard: () => import("./pages/dashboard.js"), transactions: () => import("./pages/transactions.js"), review: () => import("./pages/review.js"),
   merchants: () => import("./pages/merchants.js"), patterns: () => import("./pages/patterns.js"), ask: () => import("./pages/ask.js"),
   import: () => import("./pages/importpage.js"), model: () => import("./pages/model.js"), how: () => import("./pages/how.js"),
+  profile: () => import("./pages/profile.js"),
 };
 
 let current = null;       // {name, mod, root, params}
@@ -17,6 +19,15 @@ const main = h("main", { class: "main", id: "main", tabindex: "-1" });
 const side = h("nav", { class: "side", "aria-label": "Main" });
 const banner = h("div", { class: "banner hidden", role: "status" });
 const badge = {};
+const who = h("button", { class: "who", "aria-label": "Switch profile", "aria-haspopup": "menu", onclick: pickProfile });
+
+async function pickProfile(e) {
+  const items = [{ group: "Switch profile" }, ...state.profiles.map((p) => ({ label: p.name, value: p.id, checked: p.id === state.profile?.id })),
+                 { group: "" }, { label: "Manage profiles…", value: "__manage" }];
+  const v = await popMenu(e.currentTarget, items);
+  if (v === "__manage") location.hash = "#/profile";
+  else if (v) { try { await switchProfile(v); } catch (er) { toast(er.message); } }
+}
 
 function themeControl() {
   const mode = store("hisaab-theme") || "auto";
@@ -40,7 +51,7 @@ function buildShell() {
     svg("rect", { width: 32, height: 32, rx: 8, style: { fill: "var(--accent)" } }),
     svg("path", { d: "M9 22V10m7 12V14m7 8V8", fill: "none", "stroke-width": 3, "stroke-linecap": "round", style: { stroke: "#fff" } }));
   const brand = h("div", { class: "brand" }, logo, h("div", {}, "Hisaab", h("small", { text: "your UPI money, explained" })));
-  side.append(brand);
+  side.append(brand, who);
   const links = h("div", { class: "nav" });
   for (const [name, label, ico] of NAV) {
     const a = h("a", { href: `#/${name}`, "data-page": name }, icon(ico), label);
@@ -53,6 +64,9 @@ function buildShell() {
 }
 
 onState(() => {
+  const p = state.profile;
+  if (p) who.replaceChildren(h("span", { class: "av", text: p.name.trim().charAt(0).toUpperCase() || "?" }),
+                             h("span", { class: "nm" }, h("small", { text: "Profile" }), p.name), icon("chevron", { width: 16, height: 16 }));
   banner.classList.toggle("hidden", !state.learning);
   if (state.learning) banner.replaceChildren(h("span", { class: "spin" }), "Learning from your corrections…");
   if (badge.review) { badge.review.textContent = state.reviewCount; badge.review.classList.toggle("hidden", !state.reviewCount); }
@@ -90,4 +104,4 @@ window.addEventListener("hisaab:learned", () => {
 window.addEventListener("hisaab:data", async () => { await refreshStatus(); route(); });
 
 buildShell();
-refreshStatus().catch(() => {}).finally(route);
+Promise.all([loadProfiles(), refreshStatus()]).catch(() => {}).finally(route);
