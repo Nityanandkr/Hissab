@@ -49,3 +49,9 @@ with questions the built-in rules cannot parse. It is off by default and only ev
 Hisaab is a single-user, local-first app: it has no login, it keeps one person's data, and it only accepts requests addressed to localhost.
 Do not expose it to a network as it is. To host it for other people, add authentication, per-user storage, HTTPS and a configurable
 list of allowed host names first.
+
+### Demo on Render
+
+`render.yaml` and `app.py` let you run a public **demo** on Render: New -> Blueprint -> this repo, or a Web Service with build command
+`pip install -r requirements.txt` and start command `gunicorn app:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT`.
+The demo has no login and Render's free disk is wiped on every restart, so use **Import -> Load demo data** only, never a real statement.

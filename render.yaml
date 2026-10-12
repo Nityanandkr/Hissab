@@ -1,0 +1,9 @@
+# Render blueprint: New -> Blueprint -> pick this repo. Or, for a hand-made Web Service, copy the build and start commands below.
+services:
+  - type: web
+    name: hisaab
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # one worker: the app keeps its model and data cache in memory and writes one SQLite file
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT

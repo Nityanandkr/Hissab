@@ -32,7 +32,7 @@ from ..ingest.readers import ReadError
 from ..nlq import llm
 
 log = logging.getLogger("hisaab")
-ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"}
+ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1"} | config.EXTRA_HOSTS   # extra names only for a hosted demo (config.py)
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; font-src 'self'; "
        "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 

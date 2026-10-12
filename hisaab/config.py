@@ -15,6 +15,11 @@ MODELS_DIR = DATA_DIR / "models"
 UPLOAD_DIR = DATA_DIR / "uploads"
 
 HOST = "127.0.0.1"                     # never 0.0.0.0: statements must not be reachable from the network
+# Extra host names the server answers to, besides localhost. Empty on your own computer; a hosted demo adds its public name with
+# HISAAB_ALLOWED_HOSTS=a.example.com,b.example.com. On Render the service's own name (RENDER_EXTERNAL_HOSTNAME) is added automatically.
+EXTRA_HOSTS = {h.strip() for h in os.environ.get("HISAAB_ALLOWED_HOSTS", "").split(",") if h.strip()}
+if os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+    EXTRA_HOSTS.add(os.environ["RENDER_EXTERNAL_HOSTNAME"])
 PORT = int(os.environ.get("PORT", 5056))
 MAX_UPLOAD_MB = 15
 
