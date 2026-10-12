@@ -11,8 +11,14 @@ export function noData(root) {
     h("a", { class: "btn", href: "#/import" }, "Import my statement")));
 }
 export async function loadDemo(ev) {
-  const b = ev?.currentTarget; if (b) { b.disabled = true; b.textContent = "Loading…"; }
-  try { const r = await api.post("/api/demo/load"); toast(`Loaded ${r.new} demo transactions.`); window.dispatchEvent(new CustomEvent("hisaab:data")); }
+  const b = ev?.currentTarget; if (b) { b.disabled = true; b.textContent = "Loading… (up to a minute on a slow server)"; }
+  try {
+    const r = await api.post("/api/demo/load");
+    // a second click finds every row already stored: say so instead of "Loaded 0", which reads like a failure
+    toast(r.new ? `Loaded ${r.new} demo transactions.` : "The demo data is already loaded.");
+    location.hash = "#/dashboard";
+    window.dispatchEvent(new CustomEvent("hisaab:data"));
+  }
   catch (e) { toast(e.message); if (b) { b.disabled = false; b.textContent = "Load demo data"; } }
 }
 
