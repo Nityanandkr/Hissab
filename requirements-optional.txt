@@ -1,0 +1,2 @@
+# Only needed for the OPTIONAL LLM question-parsing mode (needs an API key; off by default)
+anthropic>=0.40

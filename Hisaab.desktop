@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Hisaab
+GenericName=UPI spending insights
+Comment=Understand your UPI spending - runs on this computer, from this folder
+Exec=/home/ntity/Downloads/Hisaab/.venv/bin/python /home/ntity/Downloads/Hisaab/launch.py
+Path=/home/ntity/Downloads/Hisaab
+Icon=/home/ntity/Downloads/Hisaab/hisaab.svg
+Terminal=false
+Categories=Office;Finance;
+StartupNotify=false
+Actions=Stop;
+
+[Desktop Action Stop]
+Name=Stop Hisaab
+Exec=/home/ntity/Downloads/Hisaab/.venv/bin/python /home/ntity/Downloads/Hisaab/launch.py --stop

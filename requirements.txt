@@ -1,0 +1,7 @@
+# Core stack: Flask + pandas + scikit-learn + SQLite (stdlib)
+flask>=3.0
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+openpyxl>=3.1      # read/write .xlsx (labeling template, bank Excel exports)
+xlrd>=2.0.1        # read legacy .xls exports (many banks still give .xls)

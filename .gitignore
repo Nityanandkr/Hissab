@@ -1,0 +1,7 @@
+# private data never goes into git
+data/*
+!data/.gitkeep
+.venv/
+__pycache__/
+*.pyc
+*.log
